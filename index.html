@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FreeMask - add finalmask to your links</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --text:#1c2128; --muted:#65707d; --line:#d8dde3; --accent:#2a7de1; --ok:#1a8a4a; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#12151a; --card:#1b2028; --text:#e6e9ee; --muted:#8b95a3; --line:#2d3440; --accent:#5aa2f5; --ok:#4cc27f; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.5 system-ui,Segoe UI,Arial,sans-serif; }
+  main { max-width:860px; margin:0 auto; padding:24px 16px 48px; }
+  h1 { font-size:22px; margin:0 0 4px; }
+  p.sub { margin:0 0 20px; color:var(--muted); }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; margin-bottom:16px; }
+  label.h { display:block; font-weight:600; margin-bottom:8px; }
+  textarea { width:100%; height:190px; resize:vertical; padding:10px; border:1px solid var(--line); border-radius:8px;
+             background:var(--bg); color:var(--text); font:12px/1.4 ui-monospace,Consolas,monospace; }
+  .row { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-top:10px; }
+  button, .btn { background:var(--accent); color:#fff; border:0; border-radius:8px; padding:8px 14px; font:inherit; cursor:pointer; }
+  button.ghost, .btn.ghost { background:transparent; color:var(--accent); border:1px solid var(--accent); }
+  button:disabled { opacity:.45; cursor:default; }
+  input[type=file] { display:none; }
+  .stat { color:var(--muted); font-size:14px; }
+  .stat b { color:var(--ok); }
+  .opt { color:var(--muted); font-size:14px; display:flex; gap:6px; align-items:center; }
+  .thanks { border-left:4px solid var(--accent); }
+  .thanks code { word-break:break-all; user-select:all; }
+  .shout { font-weight:700; letter-spacing:.3px; }
+  .steps { margin:0; padding-left:20px; color:var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <h1>FreeMask</h1>
+  <p class="sub">Add the fragment finalmask to your vless:// / trojan:// links. Everything runs in your browser - nothing is uploaded anywhere.</p>
+
+  <div class="card">
+    <ol class="steps">
+      <li>In v2rayN / PattN: select profiles &rarr; <i>Export share links to clipboard</i></li>
+      <li>Paste them below (or load a file)</li>
+      <li>Copy the result (or download it) and import it back with <i>Import from clipboard</i></li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <label class="h" for="inp">Your links</label>
+    <textarea id="inp" spellcheck="false" placeholder="Paste links here, one per line (base64 subscription text works too)..."></textarea>
+    <div class="row">
+      <label class="btn ghost" for="file">Load file</label>
+      <input type="file" id="file" accept=".txt,.json,text/plain">
+      <button class="ghost" id="clear">Clear</button>
+      <label class="opt"><input type="checkbox" id="tls"> Also patch TLS / Reality links</label>
+    </div>
+  </div>
+
+  <div class="card">
+    <label class="h" for="out">Result</label>
+    <textarea id="out" spellcheck="false" readonly placeholder="The patched links show up here."></textarea>
+    <div class="row">
+      <button id="copy" disabled>Copy</button>
+      <button class="ghost" id="dl" disabled>Download links_fm.txt</button>
+      <span class="stat" id="stat"></span>
+    </div>
+  </div>
+
+  <div class="card thanks">
+    <p style="margin-top:0">Hi!</p>
+    <p>If you're using this to reach the free internet, please don't forget to support
+       <a href="https://github.com/patterniha" target="_blank" rel="noopener">patterniha</a>. None of this would work without his tools.
+       He has lots of projects and apps planned so that every single person in Iran can get to the free internet, and that needs your support.</p>
+    <p>USDT (BEP20): <code>0x76a768B53Ca77B43086946315f0BDF21156bF424</code></p>
+    <p class="shout" style="margin-bottom:0">FREEDOM FOR IRAN'S INTERNET! FREE INTERNET FOR EVERYONE!</p>
+  </div>
+</main>
+
+<script>
+// ---- core logic -------------------------------------------------------
+const FINALMASK = {tcp:[
+  {type:"fragment", settings:{packets:"tlshello", lengths:["0","104","1"], delays:["0"], maxSplit:"0"}},
+  {type:"fragment", settings:{packets:"1-1", lengths:["114","1"], delays:["1"], maxSplit:"11"}}
+]};
+const FM = encodeURIComponent(JSON.stringify(FINALMASK));
+
+function addFm(link, patchTls) {
+  link = link.trim();
+  if (!/^(vless|trojan):\/\//.test(link)) return {link, kind:"other"};
+  const i = link.indexOf("#");
+  let body = i < 0 ? link : link.slice(0, i);
+  const name = i < 0 ? "" : link.slice(i);
+  if (/[?&]fm=/.test(body)) return {link, kind:"had"};
+  if (!patchTls && /security=(tls|reality)/.test(body)) return {link, kind:"tls"};
+  body += body.includes("?") ? "&" : "?";
+  return {link: body + "fm=" + FM + name, kind:"patched"};
+}
+
+function b64decode(s) {
+  const bin = atob(s.replace(/\s+/g, "").replace(/-/g, "+").replace(/_/g, "/"));
+  return new TextDecoder().decode(Uint8Array.from(bin, c => c.charCodeAt(0)));
+}
+function b64encode(s) {
+  let bin = ""; new TextEncoder().encode(s).forEach(b => bin += String.fromCharCode(b));
+  return btoa(bin);
+}
+
+function process(text, patchTls) {
+  text = text.trim();
+  let wasB64 = false;
+  if (text && !text.split("\n")[0].includes("://")) {
+    try { const d = b64decode(text); if (d.includes("://")) { text = d; wasB64 = true; } } catch (e) {}
+  }
+  const counts = {patched:0, tls:0, had:0, other:0};
+  const out = text.split(/\r?\n/).filter(l => l.trim()).map(l => {
+    const r = addFm(l, patchTls); counts[r.kind]++; return r.link;
+  });
+  let result = out.join("\n");
+  if (wasB64) result = b64encode(result);
+  return {result, counts, total: out.length};
+}
+// ---- end core logic ---------------------------------------------------
+
+const $ = id => document.getElementById(id);
+function run() {
+  const text = $("inp").value;
+  if (!text.trim()) { $("out").value = ""; $("stat").textContent = ""; $("copy").disabled = $("dl").disabled = true; return; }
+  const {result, counts, total} = process(text, $("tls").checked);
+  $("out").value = result;
+  $("stat").innerHTML = `<b>${counts.patched}</b> of ${total} patched` +
+    (counts.tls ? ` &middot; ${counts.tls} TLS skipped` : "") +
+    (counts.had ? ` &middot; ${counts.had} already had it` : "") +
+    (counts.other ? ` &middot; ${counts.other} not vless/trojan` : "");
+  $("copy").disabled = $("dl").disabled = !result;
+}
+$("inp").addEventListener("input", run);
+$("tls").addEventListener("change", run);
+$("clear").onclick = () => { $("inp").value = ""; run(); };
+$("file").onchange = async e => {
+  const f = e.target.files[0]; if (!f) return;
+  $("inp").value = await f.text(); e.target.value = ""; run();
+};
+$("inp").addEventListener("dragover", e => e.preventDefault());
+$("inp").addEventListener("drop", async e => {
+  e.preventDefault(); const f = e.dataTransfer.files[0];
+  if (f) { $("inp").value = await f.text(); run(); }
+});
+$("copy").onclick = async () => {
+  const t = $("out").value;
+  try { await navigator.clipboard.writeText(t); }
+  catch (e) { $("out").select(); document.execCommand("copy"); }
+  $("copy").textContent = "Copied!"; setTimeout(() => $("copy").textContent = "Copy", 1500);
+};
+$("dl").onclick = () => {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([$("out").value + "\n"], {type:"text/plain;charset=utf-8"}));
+  a.download = "links_fm.txt"; a.click(); URL.revokeObjectURL(a.href);
+};
+</script>
+</body>
+</html>
