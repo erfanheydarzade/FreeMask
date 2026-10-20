@@ -137,7 +137,9 @@ function patchLink(link, opts) {
     body = delParam(body, "fm");
     res.removed = true;
   }
-  if (opts.ech && isTls && !hasParam(body, ECH_PARAM)) {
+  if (opts.ech && isTls) {
+    // replace any existing ECH settings (e.g. the old udp:// DNS one)
+    body = delParam(delParam(body, ECH_OUT_PARAM), ECH_PARAM);
     body = addParam(body, ECH_PARAM, ECH);
     body = addParam(body, ECH_OUT_PARAM, ECH_OUT);
     res.ech = true;
