@@ -112,12 +112,15 @@ const ECH = encodeURIComponent(ECH_CONFIG_LIST);
 const ECH_OUT = encodeURIComponent(JSON.stringify(ECH_OUTBOUND));
 
 function hasParam(body, k) { return new RegExp("[?&]" + k + "=").test(body); }
+function delParam(body, k) {
+  return body.replace(new RegExp("([?&])" + k + "=[^&#]*(&?)"), (m, sep, tail) => tail ? sep : "");
+}
 function addParam(body, k, v) { return body + (body.includes("?") ? "&" : "?") + k + "=" + v; }
 
 // opts: {fm, patchTls, ech}
 function patchLink(link, opts) {
   link = link.trim();
-  const res = {link, other:false, fm:false, ech:false, had:false, tlsSkipped:false};
+  const res = {link, other:false, fm:false, ech:false, had:false, tlsSkipped:false, removed:false};
   if (!/^(vless|trojan):\/\//.test(link)) { res.other = true; return res; }
   const i = link.indexOf("#");
   let body = i < 0 ? link : link.slice(0, i);
@@ -129,6 +132,10 @@ function patchLink(link, opts) {
     if (hasParam(body, "fm")) res.had = true;
     else if (isSecure && !opts.patchTls) res.tlsSkipped = true;
     else { body = addParam(body, "fm", FM); res.fm = true; }
+  } else if (opts.ech && isTls && hasParam(body, "fm")) {
+    // ECH on, fragment off: strip any existing fragment from TLS links
+    body = delParam(body, "fm");
+    res.removed = true;
   }
   if (opts.ech && isTls && !hasParam(body, ECH_PARAM)) {
     body = addParam(body, ECH_PARAM, ECH);
@@ -154,13 +161,14 @@ function process(text, opts) {
   if (text && !text.split("\n")[0].includes("://")) {
     try { const d = b64decode(text); if (d.includes("://")) { text = d; wasB64 = true; } } catch (e) {}
   }
-  const counts = {fm:0, ech:0, tls:0, had:0, other:0};
+  const counts = {fm:0, ech:0, tls:0, had:0, other:0, removed:0};
   const out = text.split(/\r?\n/).filter(l => l.trim()).map(l => {
     const r = patchLink(l, opts);
     if (r.fm) counts.fm++;
     if (r.ech) counts.ech++;
     if (r.tlsSkipped) counts.tls++;
     if (r.had) counts.had++;
+    if (r.removed) counts.removed++;
     if (r.other) counts.other++;
     return r.link;
   });
@@ -180,6 +188,7 @@ function run() {
   const parts = [];
   if (opts.fm) parts.push(`<b>${counts.fm}</b> of ${total} fragmented`);
   if (opts.ech) parts.push(`<b>${counts.ech}</b> ECH added`);
+  if (counts.removed) parts.push(`${counts.removed} fragment removed`);
   if (counts.tls) parts.push(`${counts.tls} TLS skipped`);
   if (counts.had) parts.push(`${counts.had} already had it`);
   if (counts.other) parts.push(`${counts.other} not vless/trojan`);
@@ -187,7 +196,9 @@ function run() {
   $("copy").disabled = $("dl").disabled = !result;
 }
 $("inp").addEventListener("input", run);
-["fm", "tls", "ech"].forEach(id => $(id).addEventListener("change", run));
+["fm", "tls"].forEach(id => $(id).addEventListener("change", run));
+// Turning ECH on turns fragment off (tick it again to keep both)
+$("ech").addEventListener("change", () => { if ($("ech").checked) $("fm").checked = false; run(); });
 $("clear").onclick = () => { $("inp").value = ""; run(); };
 $("file").onchange = async e => {
   const f = e.target.files[0]; if (!f) return;
